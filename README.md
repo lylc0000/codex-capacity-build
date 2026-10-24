@@ -8,4 +8,3 @@
 - 产物用法：用 release 里的 `codex.exe` 覆盖 npm 包内嵌的同版本二进制；恢复官方：`npm i -g @openai/codex@<版本>`
 - 关闭快速重试：环境变量 `CODEX_CAPACITY_RETRY_FAST=0`
 
-补丁行为：`ServerOverloaded`（Selected model is at capacity）时在 250–2500ms 随机延迟后自动无限重试（采样和远程压缩都覆盖），每次重试都向前端发通知，计入驻留日志。
