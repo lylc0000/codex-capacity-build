@@ -1,0 +1,215 @@
+diff --git a/codex-rs/core/src/responses_retry.rs b/codex-rs/core/src/responses_retry.rs
+--- a/codex-rs/core/src/responses_retry.rs
++++ b/codex-rs/core/src/responses_retry.rs
+@@ -22,6 +22,8 @@ use tracing::warn;
+ 
+ const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
+ const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
++const SERVER_OVERLOADED_FAST_RETRY_MIN_DELAY_MS: u64 = 250;
++const SERVER_OVERLOADED_FAST_RETRY_MAX_DELAY_MS: u64 = 2500;
+ 
+ #[derive(Debug, Clone, Copy)]
+ pub(crate) enum ResponsesStreamRequest {
+@@ -31,20 +33,43 @@ pub(crate) enum ResponsesStreamRequest {
+ 
+ pub(crate) struct ResponsesStreamRetryState {
+     retries: u64,
++    server_overloaded_retries: u64,
++    fast_server_overloaded_retry: bool,
+     connection_retries: u64,
+     connection_retry_delay: Duration,
+ }
+ 
+ impl Default for ResponsesStreamRetryState {
+     fn default() -> Self {
++        let fast_server_overloaded_retry =
++            fast_server_overloaded_retry_enabled(std::env::var("CODEX_CAPACITY_RETRY_FAST").ok());
+         Self {
+             retries: 0,
++            server_overloaded_retries: 0,
++            fast_server_overloaded_retry,
+             connection_retries: 0,
+             connection_retry_delay: INITIAL_CONNECTION_RETRY_DELAY,
+         }
+     }
+ }
+ 
++fn fast_server_overloaded_retry_enabled(value: Option<String>) -> bool {
++    !value.is_some_and(|value| {
++        matches!(
++            value.trim().to_ascii_lowercase().as_str(),
++            "0" | "false" | "no" | "off"
++        )
++    })
++}
++
++/// Randomized delay between fast capacity retries so the retry cadence is not
++/// mechanical and stays gentle on the backend.
++fn server_overloaded_fast_retry_delay() -> Duration {
++    Duration::from_millis(rand::random_range(
++        SERVER_OVERLOADED_FAST_RETRY_MIN_DELAY_MS..=SERVER_OVERLOADED_FAST_RETRY_MAX_DELAY_MS,
++    ))
++}
++
+ /// Server retry advice retained after stream retries are exhausted. The turn ID
+ /// prevents a reused Guardian session from applying advice from an earlier review.
+ pub(crate) struct ExhaustedResponseRetry {
+@@ -64,6 +89,46 @@ pub(crate) async fn handle_response_stream_error(
+     request: ResponsesStreamRequest,
+ ) -> Result<(), CodexErr> {
+     let turn_context = &step_context.turn;
++    if retry_state.fast_server_overloaded_retry
++        && matches!(
++            request,
++            ResponsesStreamRequest::Sampling | ResponsesStreamRequest::RemoteCompactionV2
++        )
++        && matches!(err.details(), CodexErrorDetails::ServerOverloaded)
++        && (!turn_context.session_source.is_internal()
++            || matches!(request, ResponsesStreamRequest::RemoteCompactionV2))
++    {
++        retry_state.server_overloaded_retries =
++            retry_state.server_overloaded_retries.saturating_add(1);
++        let retry_count = retry_state.server_overloaded_retries;
++        let operation = match request {
++            ResponsesStreamRequest::Sampling => RetryOperation::Sampling,
++            ResponsesStreamRequest::RemoteCompactionV2 => RetryOperation::RemoteCompactionV2,
++        };
++        let request_label = match request {
++            ResponsesStreamRequest::Sampling => "sampling",
++            ResponsesStreamRequest::RemoteCompactionV2 => "remote compaction",
++        };
++        let delay = server_overloaded_fast_retry_delay();
++        warn!(
++            turn_id = %turn_context.sub_id,
++            retry_count,
++            ?delay,
++            "selected model is at capacity; retrying {request_label} automatically"
++        );
++        sess.notify_stream_error(
++            turn_context,
++            format!(
++                "Selected model is at capacity. Retrying {request_label} automatically (attempt {retry_count})."
++            ),
++            err,
++        )
++        .await;
++        codex_client::record_retry!(retry_count, delay, operation);
++        tokio::time::sleep(delay).await;
++        return Ok(());
++    }
++
+     if matches!(request, ResponsesStreamRequest::Sampling)
+         && matches!(err.details(), CodexErrorDetails::ContentFilter)
+     {
+diff --git a/codex-rs/core/src/responses_retry_tests.rs b/codex-rs/core/src/responses_retry_tests.rs
+--- a/codex-rs/core/src/responses_retry_tests.rs
++++ b/codex-rs/core/src/responses_retry_tests.rs
+@@ -1,5 +1,6 @@
+ use super::ResponsesStreamRequest;
+ use super::ResponsesStreamRetryState;
++use super::fast_server_overloaded_retry_enabled;
+ use super::handle_response_stream_error;
+ use super::log_retry;
+ use crate::realtime_history::RealtimeHistoryState;
+@@ -13,6 +14,101 @@ use tokio::sync::Mutex;
+ use tokio::time::Instant;
+ use tracing_test::internal::MockWriter;
+ 
++#[tokio::test]
++async fn server_overloaded_fast_retry_returns_ok_when_enabled() {
++    let (mut session, turn_context) = make_session_and_context().await;
++    let step_context = StepContext::for_test(Arc::new(turn_context));
++    session.realtime_history = Some(Mutex::new(RealtimeHistoryState::default()));
++    let mut client_session = session.services.model_client.new_session();
++    let mut retry_state = ResponsesStreamRetryState {
++        fast_server_overloaded_retry: true,
++        ..Default::default()
++    };
++
++    let result = tokio::time::timeout(
++        Duration::from_secs(5),
++        handle_response_stream_error(
++            &mut retry_state,
++            /*max_retries*/ 0,
++            CodexErr::ServerOverloaded,
++            &mut client_session,
++            &session,
++            &step_context,
++            ResponsesStreamRequest::Sampling,
++        ),
++    )
++    .await
++    .expect("fast capacity retry should not wait for the normal retry budget");
++
++    result.expect("capacity error should be retried instead of ending the turn");
++    assert_eq!(retry_state.server_overloaded_retries, 1);
++}
++
++#[tokio::test]
++async fn server_overloaded_fast_retry_covers_remote_compaction() {
++    let (mut session, turn_context) = make_session_and_context().await;
++    let step_context = StepContext::for_test(Arc::new(turn_context));
++    session.realtime_history = Some(Mutex::new(RealtimeHistoryState::default()));
++    let mut client_session = session.services.model_client.new_session();
++    let mut retry_state = ResponsesStreamRetryState {
++        fast_server_overloaded_retry: true,
++        ..Default::default()
++    };
++
++    let result = tokio::time::timeout(
++        Duration::from_secs(5),
++        handle_response_stream_error(
++            &mut retry_state,
++            /*max_retries*/ 0,
++            CodexErr::ServerOverloaded,
++            &mut client_session,
++            &session,
++            &step_context,
++            ResponsesStreamRequest::RemoteCompactionV2,
++        ),
++    )
++    .await
++    .expect("fast capacity retry should apply to remote compaction too");
++
++    result.expect("compaction capacity error should be retried instead of failing");
++    assert_eq!(retry_state.server_overloaded_retries, 1);
++}
++
++#[tokio::test]
++async fn server_overloaded_fast_retry_can_be_disabled() {
++    let (mut session, turn_context) = make_session_and_context().await;
++    let step_context = StepContext::for_test(Arc::new(turn_context));
++    session.realtime_history = Some(Mutex::new(RealtimeHistoryState::default()));
++    let mut client_session = session.services.model_client.new_session();
++    let mut retry_state = ResponsesStreamRetryState {
++        fast_server_overloaded_retry: false,
++        ..Default::default()
++    };
++
++    let result = handle_response_stream_error(
++        &mut retry_state,
++        /*max_retries*/ 0,
++        CodexErr::ServerOverloaded,
++        &mut client_session,
++        &session,
++        &step_context,
++        ResponsesStreamRequest::Sampling,
++    )
++    .await;
++
++    assert!(result.is_err());
++    assert_eq!(retry_state.server_overloaded_retries, 0);
++}
++
++#[test]
++fn server_overloaded_fast_retry_is_enabled_by_default() {
++    assert!(fast_server_overloaded_retry_enabled(None));
++    assert!(!fast_server_overloaded_retry_enabled(Some("0".to_string())));
++    assert!(!fast_server_overloaded_retry_enabled(Some(
++        "OFF".to_string()
++    )));
++}
++
+ #[tokio::test]
+ async fn sampling_retry_logs_stream_error_context() {
+     let (_session, turn_context) = make_session_and_context().await;

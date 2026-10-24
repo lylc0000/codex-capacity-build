@@ -1,0 +1,207 @@
+# 官方 codex 一发新版，自动：拉取 → 打补丁 → 测试 → 编译 → 发 Release
+# 补丁文件：patches/capacity-retry.patch（上游重构导致套不上时，本仓库会自动开 issue）
+# 测试和编译并行，发布需两者全部通过。
+name: Capacity-retry autosync
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: capacity-retry-autosync
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      tag: ${{ steps.decide.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect latest upstream release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "tag=$(gh api repos/openai/codex/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether to build
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.latest.outputs.tag }}"
+          if gh api "repos/${{ github.repository }}/releases/tags/capacity-retry-$TAG" >/dev/null 2>&1; then
+            echo "Release capacity-retry-$TAG 已存在，无需重建。" >&2
+            exit 0
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Clone upstream tag and apply patch
+        if: steps.decide.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 -b "$TAG" https://github.com/openai/codex.git codex-src
+          cd codex-src
+          if git apply --check ../patches/capacity-retry.patch 2>/tmp/apply.err; then
+            git apply ../patches/capacity-retry.patch
+          elif git apply -C1 --check ../patches/capacity-retry.patch 2>>/tmp/apply.err; then
+            git apply -C1 ../patches/capacity-retry.patch # 官方在补丁附近改了上下文，放宽匹配仍可自动套用
+          else
+            TITLE="Patch conflict on $TAG"
+            BODY="对 $TAG 应用 capacity-retry 补丁失败，需要手工更新 patches/capacity-retry.patch。\n\n\`\`\`\n$(head -c 3000 /tmp/apply.err)\n\`\`\`\n\n更新补丁后手动重新运行本工作流即可。"
+            ISSUE_URL="$(gh issue list -R "${{ github.repository }}" --state open --search "$TITLE" --json url --jq '.[0].url')"
+            if [ -z "$ISSUE_URL" ]; then
+              gh issue create -R "${{ github.repository }}" --title "$TITLE" --body "$(printf "$BODY")"
+            else
+              echo "已有同名 issue：$ISSUE_URL"
+            fi
+            exit 1
+          fi
+
+      - name: Pack patched source
+        if: steps.decide.outputs.tag != ''
+        run: tar --exclude='.git' -czf source.tgz codex-src
+
+      - name: Upload patched source
+        if: steps.decide.outputs.tag != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-source
+          path: source.tgz
+          if-no-files-found: error
+          retention-days: 3
+
+  test:
+    needs: patch
+    if: needs.patch.outputs.tag != ''
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Download patched source
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-source
+
+      - name: Extract source
+        shell: pwsh
+        run: tar -xzf source.tgz
+
+      - name: Resolve toolchain
+        id: tc
+        shell: pwsh
+        run: |
+          $m = Select-String -Path codex-src/codex-rs/rust-toolchain.toml -Pattern 'channel = "(.+)"' | Select-Object -First 1
+          "toolchain=$($m.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+
+      - name: Install Rust ${{ steps.tc.outputs.toolchain }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.tc.outputs.toolchain }}
+          components: rustfmt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codex-src/codex-rs -> target
+          shared-key: capacity-retry
+
+      - name: Check formatting
+        shell: pwsh
+        run: cargo fmt --manifest-path codex-src/codex-rs/Cargo.toml --all -- --check
+
+      - name: Test automatic capacity retry
+        shell: pwsh
+        run: >
+          cargo test --manifest-path codex-src/codex-rs/Cargo.toml
+          -p codex-core --lib server_overloaded_fast_retry
+          -- --nocapture
+
+  build:
+    needs: patch
+    if: needs.patch.outputs.tag != ''
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Download patched source
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-source
+
+      - name: Extract source
+        shell: pwsh
+        run: tar -xzf source.tgz
+
+      - name: Resolve toolchain
+        id: tc
+        shell: pwsh
+        run: |
+          $m = Select-String -Path codex-src/codex-rs/rust-toolchain.toml -Pattern 'channel = "(.+)"' | Select-Object -First 1
+          "toolchain=$($m.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+
+      - name: Install Rust ${{ steps.tc.outputs.toolchain }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.tc.outputs.toolchain }}
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: codex-src/codex-rs -> target
+          shared-key: capacity-retry
+
+      - name: Build Windows Codex executable
+        shell: pwsh
+        run: >
+          cargo build --manifest-path codex-src/codex-rs/Cargo.toml
+          --release -p codex-cli --bin codex
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          .\codex-src\codex-rs\target\release\codex.exe --version
+          .\codex-src\codex-rs\target\release\codex.exe --help | Select-Object -First 5
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-windows-x64-capacity-retry
+          path: codex-src/codex-rs/target/release/codex.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [patch, test, build]
+    if: needs.patch.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-windows-x64-capacity-retry
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.patch.outputs.tag }}
+        run: |
+          SHA256="$(sha256sum codex.exe | cut -d' ' -f1)"
+          REL="capacity-retry-$TAG"
+          NOTES="capacity-retry build based on $TAG.
+
+          SHA256: \`$SHA256\`
+          关闭快速重试: CODEX_CAPACITY_RETRY_FAST=0"
+          gh release create "$REL" -R "${{ github.repository }}" --title "$REL" --notes "$(printf "$NOTES")" codex.exe
