@@ -176,8 +176,8 @@ jobs:
       - name: Verify executable
         shell: pwsh
         run: |
-          .\codex-src\codex-rs\target\release\codex.exe --version
-          .\codex-src\codex-rs\target\release\codex.exe --help | Select-Object -First 5
+          C:\c\codex-rs\target\release\codex.exe --version
+          C:\c\codex-rs\target\release\codex.exe --help | Select-Object -First 5
 
       - name: Upload Windows executable
         uses: actions/upload-artifact@v4
