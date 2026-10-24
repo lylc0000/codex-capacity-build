@@ -137,6 +137,7 @@ jobs:
     timeout-minutes: 150
     env:
       CARGO_TERM_COLOR: always
+      CACHE_ON_FAILURE: true
     steps:
       - name: Download patched source
         uses: actions/download-artifact@v4
@@ -173,12 +174,6 @@ jobs:
           cargo build --manifest-path C:/c/codex-rs/Cargo.toml
           --release -p codex-cli --bin codex
 
-      - name: Verify executable
-        shell: pwsh
-        run: |
-          C:\c\codex-rs\target\release\codex.exe --version
-          C:\c\codex-rs\target\release\codex.exe --help | Select-Object -First 5
-
       - name: Upload Windows executable
         uses: actions/upload-artifact@v4
         with:
@@ -186,6 +181,12 @@ jobs:
           path: C:/c/codex-rs/target/release/codex.exe
           if-no-files-found: error
           retention-days: 7
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          C:\c\codex-rs\target\release\codex.exe --version
+          C:\c\codex-rs\target\release\codex.exe --help | Select-Object -First 5
 
   release:
     needs: [patch, test, build]
