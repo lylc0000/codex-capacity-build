@@ -94,15 +94,17 @@ jobs:
         with:
           name: patched-source
 
-      - name: Extract source
+      - name: Extract source to short path
         shell: pwsh
-        run: tar -xzf source.tgz
+        run: |
+          New-Item -ItemType Directory -Force C:\c | Out-Null
+          tar -xzf source.tgz -C C:\c --strip-components=1
 
       - name: Resolve toolchain
         id: tc
         shell: pwsh
         run: |
-          $m = Select-String -Path codex-src/codex-rs/rust-toolchain.toml -Pattern 'channel = "(.+)"' | Select-Object -First 1
+          $m = Select-String -Path C:/c/codex-rs/rust-toolchain.toml -Pattern 'channel = "(.+)"' | Select-Object -First 1
           "toolchain=$($m.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
 
       - name: Install Rust ${{ steps.tc.outputs.toolchain }}
@@ -114,17 +116,17 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: codex-src/codex-rs -> target
+          workspaces: C:/c/codex-rs -> target
           shared-key: capacity-retry
 
       - name: Check formatting
         shell: pwsh
-        run: cargo fmt --manifest-path codex-src/codex-rs/Cargo.toml --all -- --check
+        run: cargo fmt --manifest-path C:/c/codex-rs/Cargo.toml --all -- --check
 
       - name: Test automatic capacity retry
         shell: pwsh
         run: >
-          cargo test --manifest-path codex-src/codex-rs/Cargo.toml
+          cargo test --manifest-path C:/c/codex-rs/Cargo.toml
           -p codex-core --lib server_overloaded_fast_retry
           -- --nocapture
 
@@ -141,15 +143,17 @@ jobs:
         with:
           name: patched-source
 
-      - name: Extract source
+      - name: Extract source to short path
         shell: pwsh
-        run: tar -xzf source.tgz
+        run: |
+          New-Item -ItemType Directory -Force C:\c | Out-Null
+          tar -xzf source.tgz -C C:\c --strip-components=1
 
       - name: Resolve toolchain
         id: tc
         shell: pwsh
         run: |
-          $m = Select-String -Path codex-src/codex-rs/rust-toolchain.toml -Pattern 'channel = "(.+)"' | Select-Object -First 1
+          $m = Select-String -Path C:/c/codex-rs/rust-toolchain.toml -Pattern 'channel = "(.+)"' | Select-Object -First 1
           "toolchain=$($m.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
 
       - name: Install Rust ${{ steps.tc.outputs.toolchain }}
@@ -160,13 +164,13 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: codex-src/codex-rs -> target
+          workspaces: C:/c/codex-rs -> target
           shared-key: capacity-retry
 
       - name: Build Windows Codex executable
         shell: pwsh
         run: >
-          cargo build --manifest-path codex-src/codex-rs/Cargo.toml
+          cargo build --manifest-path C:/c/codex-rs/Cargo.toml
           --release -p codex-cli --bin codex
 
       - name: Verify executable
@@ -179,7 +183,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: codex-windows-x64-capacity-retry
-          path: codex-src/codex-rs/target/release/codex.exe
+          path: C:/c/codex-rs/target/release/codex.exe
           if-no-files-found: error
           retention-days: 7
 
