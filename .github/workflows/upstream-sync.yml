@@ -27,7 +27,9 @@ jobs:
         id: latest
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "tag=$(gh api repos/openai/codex/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
+        run: |
+          TAG=$(gh api 'repos/openai/codex/releases?per_page=30' --jq '[.[] | select(.prerelease==false and (.tag_name | test("-") | not))][0].tag_name')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Decide whether to build
         id: decide
