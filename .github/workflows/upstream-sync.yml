@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       tag: ${{ steps.decide.outputs.tag }}
+      commit: ${{ steps.commit.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,6 +68,11 @@ jobs:
             fi
             exit 1
           fi
+
+      - name: Resolve upstream commit
+        if: steps.decide.outputs.tag != ''
+        id: commit
+        run: echo "sha=$(git -C codex-src rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Pack patched source
         if: steps.decide.outputs.tag != ''
@@ -138,6 +144,9 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       CACHE_ON_FAILURE: true
+      # 与官方构建一致：把官方 tag 的提交号嵌入二进制，
+      # 否则状态库会因构建身份不符拒绝初始化（0.164 起校验）
+      STABLE_GIT_COMMIT: ${{ needs.patch.outputs.commit }}
     steps:
       - name: Download patched source
         uses: actions/download-artifact@v4
