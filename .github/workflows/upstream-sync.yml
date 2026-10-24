@@ -1,7 +1,5 @@
-# 官方 codex 一发新版，自动：拉取 → 打补丁 → 测试 → 编译 → 发 Release
-# 补丁文件：patches/capacity-retry.patch（上游重构导致套不上时，本仓库会自动开 issue）
-# 测试和编译并行，发布需两者全部通过。
-name: Capacity-retry autosync
+# 跟随上游 tag 自动构建。
+name: upstream-sync
 
 on:
   schedule:
@@ -13,7 +11,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: capacity-retry-autosync
+  group: upstream-sync
   cancel-in-progress: false
 
 jobs:
@@ -37,8 +35,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.latest.outputs.tag }}"
-          if gh api "repos/${{ github.repository }}/releases/tags/capacity-retry-$TAG" >/dev/null 2>&1; then
-            echo "Release capacity-retry-$TAG 已存在，无需重建。" >&2
+          if gh api "repos/${{ github.repository }}/releases/tags/$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，无需重建。" >&2
             exit 0
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -52,13 +50,13 @@ jobs:
           set -euo pipefail
           git clone --depth 1 -b "$TAG" https://github.com/openai/codex.git codex-src
           cd codex-src
-          if git apply --check ../patches/capacity-retry.patch 2>/tmp/apply.err; then
-            git apply ../patches/capacity-retry.patch
-          elif git apply -C1 --check ../patches/capacity-retry.patch 2>>/tmp/apply.err; then
-            git apply -C1 ../patches/capacity-retry.patch # 官方在补丁附近改了上下文，放宽匹配仍可自动套用
+          if git apply --check ../patches/codex.patch 2>/tmp/apply.err; then
+            git apply ../patches/codex.patch
+          elif git apply -C1 --check ../patches/codex.patch 2>>/tmp/apply.err; then
+            git apply -C1 ../patches/codex.patch # 上游在补丁附近改了上下文，放宽匹配仍可自动套用
           else
-            TITLE="Patch conflict on $TAG"
-            BODY="对 $TAG 应用 capacity-retry 补丁失败，需要手工更新 patches/capacity-retry.patch。\n\n\`\`\`\n$(head -c 3000 /tmp/apply.err)\n\`\`\`\n\n更新补丁后手动重新运行本工作流即可。"
+            TITLE="sync failed on $TAG"
+            BODY="对 $TAG 自动处理失败，请检查 patches/codex.patch 后重跑本工作流。\n\n\`\`\`\n$(head -c 3000 /tmp/apply.err)\n\`\`\`"
             ISSUE_URL="$(gh issue list -R "${{ github.repository }}" --state open --search "$TITLE" --json url --jq '.[0].url')"
             if [ -z "$ISSUE_URL" ]; then
               gh issue create -R "${{ github.repository }}" --title "$TITLE" --body "$(printf "$BODY")"
@@ -123,7 +121,7 @@ jobs:
         shell: pwsh
         run: cargo fmt --manifest-path C:/c/codex-rs/Cargo.toml --all -- --check
 
-      - name: Test automatic capacity retry
+      - name: Run focused tests
         shell: pwsh
         run: >
           cargo test --manifest-path C:/c/codex-rs/Cargo.toml
@@ -177,7 +175,7 @@ jobs:
       - name: Upload Windows executable
         uses: actions/upload-artifact@v4
         with:
-          name: codex-windows-x64-capacity-retry
+          name: codex-windows-x64
           path: C:/c/codex-rs/target/release/codex.exe
           if-no-files-found: error
           retention-days: 7
@@ -196,7 +194,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: codex-windows-x64-capacity-retry
+          name: codex-windows-x64
 
       - name: Tag and release
         env:
@@ -204,9 +202,8 @@ jobs:
           TAG: ${{ needs.patch.outputs.tag }}
         run: |
           SHA256="$(sha256sum codex.exe | cut -d' ' -f1)"
-          REL="capacity-retry-$TAG"
-          NOTES="capacity-retry build based on $TAG.
+          REL="$TAG"
+          NOTES="based on $TAG
 
-          SHA256: \`$SHA256\`
-          关闭快速重试: CODEX_CAPACITY_RETRY_FAST=0"
+          SHA256: \`$SHA256\`"
           gh release create "$REL" -R "${{ github.repository }}" --title "$REL" --notes "$(printf "$NOTES")" codex.exe
