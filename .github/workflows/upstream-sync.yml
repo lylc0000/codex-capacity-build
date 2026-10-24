@@ -132,7 +132,7 @@ jobs:
       - name: Run focused tests
         shell: pwsh
         run: >
-          cargo test --manifest-path C:/c/codex-rs/Cargo.toml
+          cargo test --manifest-path C:/c/codex-rs/Cargo.toml --locked
           -p codex-core --lib server_overloaded_fast_retry
           -- --nocapture
 
@@ -181,7 +181,7 @@ jobs:
         shell: pwsh
         run: >
           cargo build --manifest-path C:/c/codex-rs/Cargo.toml
-          --release -p codex-cli --bin codex
+          --release --locked -p codex-cli --bin codex
 
       - name: Upload Windows executable
         uses: actions/upload-artifact@v4
