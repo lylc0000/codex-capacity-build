@@ -150,7 +150,7 @@ jobs:
           -- --nocapture
 
   build:
-    needs: patch
+    needs: [patch, test]
     if: needs.patch.outputs.tag != ''
     runs-on: windows-latest
     timeout-minutes: 150
