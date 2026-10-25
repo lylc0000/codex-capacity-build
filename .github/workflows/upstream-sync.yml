@@ -177,11 +177,17 @@ jobs:
           workspaces: C:/c/codex-rs -> target
           shared-key: capacity-retry
 
+      - name: Diagnose lockfile mismatch
+        shell: pwsh
+        run: |
+          cargo metadata --manifest-path C:/c/codex-rs/Cargo.toml --locked --format-version 1 > $null 2> C:/c/lockdiag.txt
+          if ($LASTEXITCODE -ne 0) { Get-Content C:/c/lockdiag.txt | Select-Object -First 10 } else { 'lockfile OK?' }
+
       - name: Build Windows Codex executable
         shell: pwsh
         run: >
           cargo build --manifest-path C:/c/codex-rs/Cargo.toml
-          --release --locked -p codex-cli --bin codex
+          --release -p codex-cli --bin codex
 
       - name: Upload Windows executable
         uses: actions/upload-artifact@v4
