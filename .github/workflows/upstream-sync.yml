@@ -71,7 +71,16 @@ jobs:
 
           # 官方 Windows 构建的迁移文件是 CRLF（sqlx 校验和按字节计算）。
           # Linux 克隆是 LF，必须转换，否则状态库与官方二进制互不兼容。
-          find codex-rs/state -path '*_migrations/*.sql' -type f -exec sed -i 's/\r\?$/\r/' {} +
+          # 覆盖全部六个目录：migrations（主库 state_5 用）+ 五个 *_migrations。
+          find codex-rs/state -type f -name '*.sql' -exec sed -i 's/\r\?$/\r/' {} +
+
+          # 防回归断言：state 下不允许再存在任何 LF-only 的 .sql
+          if grep -rLI $'\r' codex-rs/state --include='*.sql' | grep -q .; then
+            echo 'LF-only migration files remain:' >&2
+            grep -rLI $'\r' codex-rs/state --include='*.sql' >&2
+            exit 1
+          fi
+          echo "CRLF check OK: $(find codex-rs/state -name '*.sql' | wc -l) migration files all CRLF"
 
       - name: Resolve upstream commit
         if: steps.decide.outputs.tag != ''
