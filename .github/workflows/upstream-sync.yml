@@ -71,7 +71,7 @@ jobs:
 
           # 官方 Windows 构建的迁移文件是 CRLF（sqlx 校验和按字节计算）。
           # Linux 克隆是 LF，必须转换，否则状态库与官方二进制互不兼容。
-          find codex-src/codex-rs/state -path '*_migrations/*.sql' -type f -exec sed -i 's/\r\?$/\r/' {} +
+          find codex-rs/state -path '*_migrations/*.sql' -type f -exec sed -i 's/\r\?$/\r/' {} +
 
       - name: Resolve upstream commit
         if: steps.decide.outputs.tag != ''
