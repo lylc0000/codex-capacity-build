@@ -136,7 +136,7 @@ jobs:
       - name: Run focused tests
         shell: pwsh
         run: >
-          cargo test --manifest-path C:/c/codex-rs/Cargo.toml --locked
+          cargo test --manifest-path C:/c/codex-rs/Cargo.toml
           -p codex-core --lib server_overloaded_fast_retry
           -- --nocapture
 
