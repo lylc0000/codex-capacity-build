@@ -69,6 +69,10 @@ jobs:
             exit 1
           fi
 
+          # 官方 Windows 构建的迁移文件是 CRLF（sqlx 校验和按字节计算）。
+          # Linux 克隆是 LF，必须转换，否则状态库与官方二进制互不兼容。
+          find codex-src/codex-rs/state -path '*_migrations/*.sql' -type f -exec sed -i 's/\r\?$/\r/' {} +
+
       - name: Resolve upstream commit
         if: steps.decide.outputs.tag != ''
         id: commit
@@ -176,12 +180,6 @@ jobs:
         with:
           workspaces: C:/c/codex-rs -> target
           shared-key: capacity-retry
-
-      - name: Diagnose lockfile mismatch
-        shell: pwsh
-        run: |
-          cargo metadata --manifest-path C:/c/codex-rs/Cargo.toml --locked --format-version 1 > $null 2> C:/c/lockdiag.txt
-          if ($LASTEXITCODE -ne 0) { Get-Content C:/c/lockdiag.txt | Select-Object -First 10 } else { 'lockfile OK?' }
 
       - name: Build Windows Codex executable
         shell: pwsh
