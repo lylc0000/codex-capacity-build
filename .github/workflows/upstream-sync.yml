@@ -132,6 +132,14 @@ jobs:
           toolchain: ${{ steps.tc.outputs.toolchain }}
           components: rustfmt
 
+      - name: Configure Cargo for Windows long paths
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:\c\cargo | Out-Null
+          "CARGO_HOME=C:\c\cargo" >> $env:GITHUB_ENV
+          "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> $env:GITHUB_ENV
+          git config --global core.longpaths true
+
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -183,6 +191,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ steps.tc.outputs.toolchain }}
+
+      - name: Configure Cargo for Windows long paths
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:\c\cargo | Out-Null
+          "CARGO_HOME=C:\c\cargo" >> $env:GITHUB_ENV
+          "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> $env:GITHUB_ENV
+          git config --global core.longpaths true
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
