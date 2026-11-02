@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  issues: write
 
 concurrency:
   group: upstream-sync
@@ -44,6 +43,23 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Notify new version
+        if: steps.decide.outputs.tag != ''
+        continue-on-error: true
+        uses: harryzcy/action-bark@v2.4.0
+        with:
+          status: custom
+          title: Codex 检测到新版本
+          body: |
+            版本：${{ steps.decide.outputs.tag }}
+            阶段：正在套补丁
+            运行：#${{ github.run_number }}
+          device_key: ${{ secrets.BARK_DEVICE_KEY }}
+          bark_server_url: https://api.day.app
+          sound: calypso
+          level: active
+          group: codex-capacity-build
+
       - name: Clone upstream tag and apply patch
         if: steps.decide.outputs.tag != ''
         env:
@@ -58,14 +74,8 @@ jobs:
           elif git apply -C1 --check ../patches/codex.patch 2>>/tmp/apply.err; then
             git apply -C1 ../patches/codex.patch # 上游在补丁附近改了上下文，放宽匹配仍可自动套用
           else
-            TITLE="sync failed on $TAG"
-            BODY="对 $TAG 自动处理失败，请检查 patches/codex.patch 后重跑本工作流。\n\n\`\`\`\n$(head -c 3000 /tmp/apply.err)\n\`\`\`"
-            ISSUE_URL="$(gh issue list -R "${{ github.repository }}" --state open --search "$TITLE" --json url --jq '.[0].url')"
-            if [ -z "$ISSUE_URL" ]; then
-              gh issue create -R "${{ github.repository }}" --title "$TITLE" --body "$(printf "$BODY")"
-            else
-              echo "已有同名 issue：$ISSUE_URL"
-            fi
+            echo "Failed to apply patches/codex.patch to $TAG" >&2
+            head -c 3000 /tmp/apply.err >&2
             exit 1
           fi
 
@@ -100,6 +110,23 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Notify patch failure
+        if: failure()
+        continue-on-error: true
+        uses: harryzcy/action-bark@v2.4.0
+        with:
+          status: custom
+          title: Codex 补丁失败
+          body: |
+            版本：${{ steps.decide.outputs.tag || '未知' }}
+            阶段：套补丁
+            运行：#${{ github.run_number }}
+          device_key: ${{ secrets.BARK_DEVICE_KEY }}
+          bark_server_url: https://api.day.app
+          sound: suspense
+          level: timeSensitive
+          group: codex-capacity-build
+
   test:
     needs: patch
     if: needs.patch.outputs.tag != ''
@@ -108,6 +135,22 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
+      - name: Notify test started
+        continue-on-error: true
+        uses: harryzcy/action-bark@v2.4.0
+        with:
+          status: custom
+          title: Codex 正在测试
+          body: |
+            版本：${{ needs.patch.outputs.tag }}
+            阶段：正在测试
+            运行：#${{ github.run_number }}
+          device_key: ${{ secrets.BARK_DEVICE_KEY }}
+          bark_server_url: https://api.day.app
+          sound: calypso
+          level: active
+          group: codex-capacity-build
+
       - name: Download patched source
         uses: actions/download-artifact@v4
         with:
@@ -157,6 +200,23 @@ jobs:
           -p codex-core --lib server_overloaded_fast_retry
           -- --nocapture
 
+      - name: Notify test failure
+        if: failure()
+        continue-on-error: true
+        uses: harryzcy/action-bark@v2.4.0
+        with:
+          status: custom
+          title: Codex 测试失败
+          body: |
+            版本：${{ needs.patch.outputs.tag }}
+            阶段：测试
+            运行：#${{ github.run_number }}
+          device_key: ${{ secrets.BARK_DEVICE_KEY }}
+          bark_server_url: https://api.day.app
+          sound: suspense
+          level: timeSensitive
+          group: codex-capacity-build
+
   build:
     needs: [patch, test]
     if: needs.patch.outputs.tag != ''
@@ -169,6 +229,22 @@ jobs:
       # 否则状态库会因构建身份不符拒绝初始化（0.164 起校验）
       STABLE_GIT_COMMIT: ${{ needs.patch.outputs.commit }}
     steps:
+      - name: Notify build started
+        continue-on-error: true
+        uses: harryzcy/action-bark@v2.4.0
+        with:
+          status: custom
+          title: Codex 正在编译
+          body: |
+            版本：${{ needs.patch.outputs.tag }}
+            阶段：正在编译
+            运行：#${{ github.run_number }}
+          device_key: ${{ secrets.BARK_DEVICE_KEY }}
+          bark_server_url: https://api.day.app
+          sound: calypso
+          level: active
+          group: codex-capacity-build
+
       - name: Download patched source
         uses: actions/download-artifact@v4
         with:
@@ -226,12 +302,45 @@ jobs:
           C:\c\codex-rs\target\release\codex.exe --version
           C:\c\codex-rs\target\release\codex.exe --help | Select-Object -First 5
 
+      - name: Notify build failure
+        if: failure()
+        continue-on-error: true
+        uses: harryzcy/action-bark@v2.4.0
+        with:
+          status: custom
+          title: Codex 编译失败
+          body: |
+            版本：${{ needs.patch.outputs.tag }}
+            阶段：编译
+            运行：#${{ github.run_number }}
+          device_key: ${{ secrets.BARK_DEVICE_KEY }}
+          bark_server_url: https://api.day.app
+          sound: suspense
+          level: timeSensitive
+          group: codex-capacity-build
+
   release:
     needs: [patch, test, build]
     if: needs.patch.outputs.tag != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Notify release started
+        continue-on-error: true
+        uses: harryzcy/action-bark@v2.4.0
+        with:
+          status: custom
+          title: Codex 正在发布
+          body: |
+            版本：${{ needs.patch.outputs.tag }}
+            阶段：正在发布 Release
+            运行：#${{ github.run_number }}
+          device_key: ${{ secrets.BARK_DEVICE_KEY }}
+          bark_server_url: https://api.day.app
+          sound: calypso
+          level: active
+          group: codex-capacity-build
+
       - uses: actions/download-artifact@v4
         with:
           name: codex-windows-x64
@@ -247,3 +356,37 @@ jobs:
 
           SHA256: \`$SHA256\`"
           gh release create "$REL" -R "${{ github.repository }}" --title "$REL" --notes "$(printf "$NOTES")" codex.exe
+
+      - name: Notify release success
+        continue-on-error: true
+        uses: harryzcy/action-bark@v2.4.0
+        with:
+          status: custom
+          title: Codex 发布成功
+          body: |
+            版本：${{ needs.patch.outputs.tag }}
+            阶段：Release 已发布
+            运行：#${{ github.run_number }}
+          device_key: ${{ secrets.BARK_DEVICE_KEY }}
+          bark_server_url: https://api.day.app
+          sound: calypso
+          level: active
+          group: codex-capacity-build
+          url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.patch.outputs.tag }}
+
+      - name: Notify release failure
+        if: failure()
+        continue-on-error: true
+        uses: harryzcy/action-bark@v2.4.0
+        with:
+          status: custom
+          title: Codex 发布失败
+          body: |
+            版本：${{ needs.patch.outputs.tag }}
+            阶段：发布 Release
+            运行：#${{ github.run_number }}
+          device_key: ${{ secrets.BARK_DEVICE_KEY }}
+          bark_server_url: https://api.day.app
+          sound: suspense
+          level: timeSensitive
+          group: codex-capacity-build
