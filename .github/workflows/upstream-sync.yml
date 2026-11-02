@@ -52,7 +52,6 @@ jobs:
           title: Codex 检测到新版本
           body: |
             版本：${{ steps.decide.outputs.tag }}
-            阶段：正在套补丁
             运行：#${{ github.run_number }}
           device_key: ${{ secrets.BARK_DEVICE_KEY }}
           bark_server_url: https://api.day.app
@@ -117,10 +116,6 @@ jobs:
         with:
           status: custom
           title: Codex 补丁失败
-          body: |
-            版本：${{ steps.decide.outputs.tag || '未知' }}
-            阶段：套补丁
-            运行：#${{ github.run_number }}
           device_key: ${{ secrets.BARK_DEVICE_KEY }}
           bark_server_url: https://api.day.app
           sound: suspense
@@ -141,10 +136,6 @@ jobs:
         with:
           status: custom
           title: Codex 正在测试
-          body: |
-            版本：${{ needs.patch.outputs.tag }}
-            阶段：正在测试
-            运行：#${{ github.run_number }}
           device_key: ${{ secrets.BARK_DEVICE_KEY }}
           bark_server_url: https://api.day.app
           sound: calypso
@@ -207,10 +198,6 @@ jobs:
         with:
           status: custom
           title: Codex 测试失败
-          body: |
-            版本：${{ needs.patch.outputs.tag }}
-            阶段：测试
-            运行：#${{ github.run_number }}
           device_key: ${{ secrets.BARK_DEVICE_KEY }}
           bark_server_url: https://api.day.app
           sound: suspense
@@ -226,7 +213,6 @@ jobs:
       CARGO_TERM_COLOR: always
       CACHE_ON_FAILURE: true
       # 与官方构建一致：把官方 tag 的提交号嵌入二进制，
-      # 否则状态库会因构建身份不符拒绝初始化（0.164 起校验）
       STABLE_GIT_COMMIT: ${{ needs.patch.outputs.commit }}
     steps:
       - name: Notify build started
@@ -235,10 +221,6 @@ jobs:
         with:
           status: custom
           title: Codex 正在编译
-          body: |
-            版本：${{ needs.patch.outputs.tag }}
-            阶段：正在编译
-            运行：#${{ github.run_number }}
           device_key: ${{ secrets.BARK_DEVICE_KEY }}
           bark_server_url: https://api.day.app
           sound: calypso
@@ -309,10 +291,6 @@ jobs:
         with:
           status: custom
           title: Codex 编译失败
-          body: |
-            版本：${{ needs.patch.outputs.tag }}
-            阶段：编译
-            运行：#${{ github.run_number }}
           device_key: ${{ secrets.BARK_DEVICE_KEY }}
           bark_server_url: https://api.day.app
           sound: suspense
@@ -331,10 +309,6 @@ jobs:
         with:
           status: custom
           title: Codex 正在发布
-          body: |
-            版本：${{ needs.patch.outputs.tag }}
-            阶段：正在发布 Release
-            运行：#${{ github.run_number }}
           device_key: ${{ secrets.BARK_DEVICE_KEY }}
           bark_server_url: https://api.day.app
           sound: calypso
@@ -363,10 +337,6 @@ jobs:
         with:
           status: custom
           title: Codex 发布成功
-          body: |
-            版本：${{ needs.patch.outputs.tag }}
-            阶段：Release 已发布
-            运行：#${{ github.run_number }}
           device_key: ${{ secrets.BARK_DEVICE_KEY }}
           bark_server_url: https://api.day.app
           sound: calypso
@@ -381,10 +351,6 @@ jobs:
         with:
           status: custom
           title: Codex 发布失败
-          body: |
-            版本：${{ needs.patch.outputs.tag }}
-            阶段：发布 Release
-            运行：#${{ github.run_number }}
           device_key: ${{ secrets.BARK_DEVICE_KEY }}
           bark_server_url: https://api.day.app
           sound: suspense
