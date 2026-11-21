@@ -269,7 +269,7 @@ jobs:
         run: >
           cargo rustc --manifest-path C:/c/codex-rs/Cargo.toml
           --release -p codex-cli --bin codex
-          -- -C link-arg=/PDB:NONE
+          -- -C debuginfo=0 -C link-arg=/PDB:NONE
 
       - name: Upload Windows executable
         uses: actions/upload-artifact@v4
